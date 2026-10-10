@@ -52,7 +52,7 @@
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ type: "ai-video-order-result", ok: !!ok, orderId: orderId || null }, STUDIO_ORIGIN);
       }
-    } catch (e) { }
+    } catch (e) {}
   }
 
   function setProgress(done, total) {
@@ -197,6 +197,35 @@
     }
   }
 
+  function submitSignup(req) {
+    if (submitted) return;
+    submitted = true;
+    if (!req || !req.email) {
+      showResult(false, null, "The sign-up data was incomplete.");
+      return;
+    }
+    titleEl.textContent = "Creating your account…";
+    msgEl.textContent = "Setting up your free credits…";
+    var payload = { type: "signup-request", email: req.email };
+    postPayload(payload, "signupJson").then(function (ok) {
+      if (ok) {
+        iconEl.className = "ok";
+        iconEl.textContent = "🎉";
+        titleEl.textContent = "You're signed up!";
+        msgEl.textContent = "Your 2 free videos + 2 free images are on their way (arrives in ~2 minutes).";
+        backBtn.style.display = "inline-block";
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: "ai-video-signup-result", ok: true, email: req.email }, STUDIO_ORIGIN);
+          }
+        } catch (e) {}
+        setTimeout(function () { try { window.close(); } catch (e) {} }, 6000);
+      } else {
+        showResult(false, null, "The order service did not accept the submission.");
+      }
+    });
+  }
+
   try {
     var h = location.hash || "";
     if (h.indexOf("#order=") === 0 && h.length > 7) {
@@ -205,14 +234,18 @@
     } else if (h.indexOf("#image-request=") === 0 && h.length > 15) {
       var imgReq = JSON.parse(decodeURIComponent(h.slice(15)));
       submitImageRequest(imgReq);
+    } else if (h.indexOf("#signup=") === 0 && h.length > 8) {
+      var signupReq = JSON.parse(decodeURIComponent(h.slice(8)));
+      submitSignup(signupReq);
     }
-  } catch (e) { }
+  } catch (e) {}
 
   window.addEventListener("message", function (ev) {
     if (ev.origin !== STUDIO_ORIGIN) return;
     var d = ev.data || {};
     if (d && d.type === "ai-video-order" && d.order) submitOrder(d.order);
     if (d && d.type === "ai-video-image-request" && d.request) submitImageRequest(d.request);
+    if (d && d.type === "ai-video-signup" && d.request) submitSignup(d.request);
   });
 
   try {
