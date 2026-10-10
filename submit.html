@@ -151,11 +151,60 @@
     if (images.length) { sendImage(0); } else { sendOrder(); }
   }
 
+  function submitImageRequest(req) {
+    if (submitted) return;
+    submitted = true;
+    if (!req || !req.requestId || !req.email || !req.description) {
+      showResult(false, null, "The image request data was incomplete.");
+      return;
+    }
+    titleEl.textContent = "Generating your image…";
+    var refImage = req.referenceImage || null;
+
+    function sendRequest() {
+      msgEl.textContent = "Submitting your image request…";
+      var slim = {};
+      for (var k in req) { if (Object.prototype.hasOwnProperty.call(req, k)) slim[k] = req[k]; }
+      delete slim.referenceImage;
+      slim.hasReferenceImage = !!refImage;
+      postPayload(slim, "imageRequestJson").then(function (ok) {
+        if (ok) {
+          showResult(true, req.requestId);
+        } else {
+          showResult(false, req.requestId, "The order service did not accept the submission.");
+        }
+      });
+    }
+
+    if (refImage) {
+      msgEl.textContent = "Uploading reference image…";
+      setProgress(0, 2);
+      var payload = {
+        type: "reference-image",
+        requestId: req.requestId,
+        imageIndex: 0,
+        sceneIndex: null,
+        label: "Reference",
+        imageKind: "upload",
+        dataUrl: refImage
+      };
+      postPayload(payload, "imageJson").then(function () {
+        setProgress(1, 2);
+        sendRequest();
+      });
+    } else {
+      sendRequest();
+    }
+  }
+
   try {
     var h = location.hash || "";
     if (h.indexOf("#order=") === 0 && h.length > 7) {
       var order = JSON.parse(decodeURIComponent(h.slice(7)));
       submitOrder(order);
+    } else if (h.indexOf("#image-request=") === 0 && h.length > 15) {
+      var imgReq = JSON.parse(decodeURIComponent(h.slice(15)));
+      submitImageRequest(imgReq);
     }
   } catch (e) { }
 
@@ -163,6 +212,7 @@
     if (ev.origin !== STUDIO_ORIGIN) return;
     var d = ev.data || {};
     if (d && d.type === "ai-video-order" && d.order) submitOrder(d.order);
+    if (d && d.type === "ai-video-image-request" && d.request) submitImageRequest(d.request);
   });
 
   try {
@@ -184,4 +234,3 @@
 </script>
 </body>
 </html>
-
