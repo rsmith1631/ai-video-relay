@@ -21,6 +21,8 @@
   a.btn { display: inline-block; margin-top: 12px; background: #2b6cff; color: #fff;
           text-decoration: none; padding: 12px 28px; border-radius: 999px; font-weight: 600; }
   .err { color: #c0392b; }
+  .progress { height: 8px; background: #e6ecff; border-radius: 999px; margin: 16px 0 4px; overflow: hidden; }
+  .progress > div { height: 100%; background: #2b6cff; width: 0%; transition: width .3s; border-radius: 999px; }
 </style>
 </head>
 <body>
@@ -28,6 +30,7 @@
   <div id="icon" class="spinner"></div>
   <h1 id="title">Submitting your order…</h1>
   <p id="msg">Hang tight — your video order is on its way to the studio.</p>
+  <div id="progWrap" class="progress" style="display:none"><div id="progBar"></div></div>
   <div id="orderBox" class="order-id" style="display:none"></div>
   <a id="backBtn" class="btn" style="display:none" href="https://muse.ai/s/ai-video-studio-2-exj63xymp71xju">Back to AI Video Studio</a>
 </div>
@@ -40,6 +43,8 @@
   var iconEl = document.getElementById("icon");
   var orderBox = document.getElementById("orderBox");
   var backBtn = document.getElementById("backBtn");
+  var progWrap = document.getElementById("progWrap");
+  var progBar = document.getElementById("progBar");
   var submitted = false;
 
   function notifyOpener(ok, orderId) {
@@ -47,13 +52,20 @@
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ type: "ai-video-order-result", ok: !!ok, orderId: orderId || null }, STUDIO_ORIGIN);
       }
-    } catch (e) {}
+    } catch (e) { }
+  }
+
+  function setProgress(done, total) {
+    if (!total) { progWrap.style.display = "none"; return; }
+    progWrap.style.display = "block";
+    progBar.style.width = Math.round((done / total) * 100) + "%";
   }
 
   function showResult(ok, orderId, detail) {
     iconEl.className = "ok";
     iconEl.textContent = ok ? "✅" : "❌";
     titleEl.textContent = ok ? "Order received!" : "Something went wrong";
+    progWrap.style.display = "none";
     if (ok) {
       msgEl.textContent = "Your video is now in the render queue. Track it in the studio with your order ID below.";
       if (orderId) { orderBox.style.display = "block"; orderBox.textContent = "Order ID: " + orderId; }
@@ -69,6 +81,18 @@
     }
   }
 
+  function postPayload(payload, fieldName) {
+    var body = fieldName + "=" + encodeURIComponent(JSON.stringify(payload));
+    return fetch(FORMSUBMIT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+      body: body
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { return !!(j && (j.success === true || j.success === "true")); })
+      .catch(function () { return false; });
+  }
+
   function submitOrder(order) {
     if (submitted) return;
     submitted = true;
@@ -76,23 +100,55 @@
       showResult(false, null, "The order data was incomplete.");
       return;
     }
-    var body = "orderJson=" + encodeURIComponent(JSON.stringify(order));
-    fetch(FORMSUBMIT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
-      body: body
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (j) {
-        if (j && (j.success === true || j.success === "true")) {
+    var images = order.referenceImages || [];
+    var totalSteps = images.length + 1;
+    var sentImages = [];
+
+    function sendImage(i) {
+      if (i >= images.length) { sendOrder(); return; }
+      var img = images[i] || {};
+      setProgress(i, totalSteps);
+      msgEl.textContent = "Uploading reference image " + (i + 1) + " of " + images.length + "…";
+      var payload = {
+        type: "reference-image",
+        orderId: order.orderId,
+        imageIndex: i,
+        sceneIndex: (img.sceneIndex === undefined ? null : img.sceneIndex),
+        label: img.label || ("Image " + (i + 1)),
+        imageKind: img.imageKind || "upload",
+        dataUrl: img.dataUrl || ""
+      };
+      if (!payload.dataUrl) { sendImage(i + 1); return; }
+      postPayload(payload, "imageJson").then(function (ok) {
+        if (ok) {
+          sentImages.push({
+            sceneIndex: payload.sceneIndex,
+            kind: "reference",
+            label: payload.label,
+            imageKind: payload.imageKind,
+            imageIndex: i
+          });
+        }
+        sendImage(i + 1);
+      });
+    }
+
+    function sendOrder() {
+      setProgress(images.length, totalSteps);
+      msgEl.textContent = "Submitting your order…";
+      var slim = {};
+      for (var k in order) { if (Object.prototype.hasOwnProperty.call(order, k)) slim[k] = order[k]; }
+      slim.referenceImages = sentImages;
+      postPayload(slim, "orderJson").then(function (ok) {
+        if (ok) {
           showResult(true, order.orderId);
         } else {
           showResult(false, order.orderId, "The order service did not accept the submission.");
         }
-      })
-      .catch(function () {
-        showResult(false, order.orderId, "A network error interrupted the submission.");
       });
+    }
+
+    if (images.length) { sendImage(0); } else { sendOrder(); }
   }
 
   try {
@@ -101,7 +157,7 @@
       var order = JSON.parse(decodeURIComponent(h.slice(7)));
       submitOrder(order);
     }
-  } catch (e) {}
+  } catch (e) { }
 
   window.addEventListener("message", function (ev) {
     if (ev.origin !== STUDIO_ORIGIN) return;
@@ -128,3 +184,4 @@
 </script>
 </body>
 </html>
+
