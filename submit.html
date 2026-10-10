@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Submitting your video order…</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: #f4f7ff;
+         color: #1a2340; display: flex; align-items: center; justify-content: center;
+         min-height: 100vh; margin: 0; padding: 24px; box-sizing: border-box; }
+  .card { background: #fff; border-radius: 16px; padding: 32px; max-width: 460px; width: 100%;
+          box-shadow: 0 8px 30px rgba(30,60,180,.12); text-align: center; }
+  .spinner { width: 40px; height: 40px; margin: 0 auto 16px; border-radius: 50%;
+             border: 4px solid #dbe4ff; border-top-color: #2b6cff; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ok { font-size: 52px; margin-bottom: 8px; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  p { font-size: 14px; color: #5a6b8c; line-height: 1.5; }
+  .order-id { font-family: monospace; font-size: 12px; background: #f0f4ff; border-radius: 8px;
+              padding: 8px 12px; margin: 12px 0; word-break: break-all; }
+  a.btn { display: inline-block; margin-top: 12px; background: #2b6cff; color: #fff;
+          text-decoration: none; padding: 12px 28px; border-radius: 999px; font-weight: 600; }
+  .err { color: #c0392b; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="icon" class="spinner"></div>
+  <h1 id="title">Submitting your order…</h1>
+  <p id="msg">Hang tight — your video order is on its way to the studio.</p>
+  <div id="orderBox" class="order-id" style="display:none"></div>
+  <a id="backBtn" class="btn" style="display:none" href="https://muse.ai/s/ai-video-studio-2-exj63xymp71xju">Back to AI Video Studio</a>
+</div>
+<script>
+(function () {
+  var FORMSUBMIT_URL = "https://formsubmit.co/ajax/rsmith1631@gmail.com";
+  var STUDIO_ORIGIN = "https://muse.ai";
+  var titleEl = document.getElementById("title");
+  var msgEl = document.getElementById("msg");
+  var iconEl = document.getElementById("icon");
+  var orderBox = document.getElementById("orderBox");
+  var backBtn = document.getElementById("backBtn");
+  var submitted = false;
+
+  function notifyOpener(ok, orderId) {
+    try {
+      if (window.opener && !window.opener.closed) {
+        window.opener.postMessage({ type: "ai-video-order-result", ok: !!ok, orderId: orderId || null }, STUDIO_ORIGIN);
+      }
+    } catch (e) {}
+  }
+
+  function showResult(ok, orderId, detail) {
+    iconEl.className = "ok";
+    iconEl.textContent = ok ? "✅" : "❌";
+    titleEl.textContent = ok ? "Order received!" : "Something went wrong";
+    if (ok) {
+      msgEl.textContent = "Your video is now in the render queue. Track it in the studio with your order ID below.";
+      if (orderId) { orderBox.style.display = "block"; orderBox.textContent = "Order ID: " + orderId; }
+      backBtn.style.display = "inline-block";
+      notifyOpener(true, orderId);
+      setTimeout(function () { try { window.close(); } catch (e) {} }, 6000);
+    } else {
+      msgEl.innerHTML = "We couldn't submit your order. " + (detail || "") +
+        " Please go back to the studio and try again — your project is safe.";
+      msgEl.className = "err";
+      backBtn.style.display = "inline-block";
+      notifyOpener(false, orderId);
+    }
+  }
+
+  function submitOrder(order) {
+    if (submitted) return;
+    submitted = true;
+    if (!order || !order.orderId || !order.email) {
+      showResult(false, null, "The order data was incomplete.");
+      return;
+    }
+    var body = "orderJson=" + encodeURIComponent(JSON.stringify(order));
+    fetch(FORMSUBMIT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+      body: body
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (j && (j.success === true || j.success === "true")) {
+          showResult(true, order.orderId);
+        } else {
+          showResult(false, order.orderId, "The order service did not accept the submission.");
+        }
+      })
+      .catch(function () {
+        showResult(false, order.orderId, "A network error interrupted the submission.");
+      });
+  }
+
+  try {
+    var h = location.hash || "";
+    if (h.indexOf("#order=") === 0 && h.length > 7) {
+      var order = JSON.parse(decodeURIComponent(h.slice(7)));
+      submitOrder(order);
+    }
+  } catch (e) {}
+
+  window.addEventListener("message", function (ev) {
+    if (ev.origin !== STUDIO_ORIGIN) return;
+    var d = ev.data || {};
+    if (d && d.type === "ai-video-order" && d.order) submitOrder(d.order);
+  });
+
+  try {
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: "ai-video-relay-ready" }, STUDIO_ORIGIN);
+    }
+  } catch (e) {}
+
+  setTimeout(function () {
+    if (!submitted) {
+      iconEl.className = "ok";
+      iconEl.textContent = "⏳";
+      titleEl.textContent = "Waiting for your order…";
+      msgEl.textContent = "If nothing happens, go back to the studio and tap Submit again — your project is safe.";
+      backBtn.style.display = "inline-block";
+    }
+  }, 10000);
+})();
+</script>
+</body>
+</html>
