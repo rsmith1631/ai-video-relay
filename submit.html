@@ -52,7 +52,7 @@
       if (window.opener && !window.opener.closed) {
         window.opener.postMessage({ type: "ai-video-order-result", ok: !!ok, orderId: orderId || null }, STUDIO_ORIGIN);
       }
-    } catch (e) {}
+    } catch (e) { /* opener unreachable; page still shows status */ }
   }
 
   function setProgress(done, total) {
@@ -81,6 +81,7 @@
     }
   }
 
+  // POST one payload to the order service. Resolves true on acceptance.
   function postPayload(payload, fieldName) {
     var body = fieldName + "=" + encodeURIComponent(JSON.stringify(payload));
     return fetch(FORMSUBMIT_URL, {
@@ -93,6 +94,9 @@
       .catch(function () { return false; });
   }
 
+  // Reference images travel as their own small messages (the order service
+  // rejects oversized submissions). Images go first; the order (with image
+  // metadata but no pixel data) goes last.
   function submitOrder(order) {
     if (submitted) return;
     submitted = true;
@@ -102,7 +106,7 @@
     }
     var images = order.referenceImages || [];
     var totalSteps = images.length + 1;
-    var sentImages = [];
+    var sentImages = []; // metadata for images that actually uploaded
 
     function sendImage(i) {
       if (i >= images.length) { sendOrder(); return; }
@@ -118,6 +122,7 @@
         imageKind: img.imageKind || "upload",
         dataUrl: img.dataUrl || ""
       };
+      // Skip empty slots rather than failing the order.
       if (!payload.dataUrl) { sendImage(i + 1); return; }
       postPayload(payload, "imageJson").then(function (ok) {
         if (ok) {
@@ -129,6 +134,7 @@
             imageIndex: i
           });
         }
+        // A failed image upload skips that image; the order still goes through.
         sendImage(i + 1);
       });
     }
@@ -138,7 +144,7 @@
       msgEl.textContent = "Submitting your order…";
       var slim = {};
       for (var k in order) { if (Object.prototype.hasOwnProperty.call(order, k)) slim[k] = order[k]; }
-      slim.referenceImages = sentImages;
+      slim.referenceImages = sentImages; // metadata only, no pixel data
       postPayload(slim, "orderJson").then(function (ok) {
         if (ok) {
           showResult(true, order.orderId);
@@ -151,6 +157,8 @@
     if (images.length) { sendImage(0); } else { sendOrder(); }
   }
 
+  // Image generation requests (#image-request=<encoded JSON>).
+  // Format: {type:"image-request", requestId, email, description, referenceImage (dataUrl, optional), creditCost}
   function submitImageRequest(req) {
     if (submitted) return;
     submitted = true;
@@ -165,7 +173,7 @@
       msgEl.textContent = "Submitting your image request…";
       var slim = {};
       for (var k in req) { if (Object.prototype.hasOwnProperty.call(req, k)) slim[k] = req[k]; }
-      delete slim.referenceImage;
+      delete slim.referenceImage; // pixel data already sent separately
       slim.hasReferenceImage = !!refImage;
       postPayload(slim, "imageRequestJson").then(function (ok) {
         if (ok) {
@@ -190,13 +198,15 @@
       };
       postPayload(payload, "imageJson").then(function () {
         setProgress(1, 2);
-        sendRequest();
+        sendRequest(); // proceed even if the reference upload failed; generator works from text alone
       });
     } else {
       sendRequest();
     }
   }
 
+  // Sign-up requests (#signup=<encoded JSON>).
+  // Format: {type:"signup-request", email}
   function submitSignup(req) {
     if (submitted) return;
     submitted = true;
@@ -226,6 +236,7 @@
     });
   }
 
+  // Intake method 1: order passed in the URL fragment (#order=<encoded JSON>).
   try {
     var h = location.hash || "";
     if (h.indexOf("#order=") === 0 && h.length > 7) {
@@ -238,8 +249,9 @@
       var signupReq = JSON.parse(decodeURIComponent(h.slice(8)));
       submitSignup(signupReq);
     }
-  } catch (e) {}
+  } catch (e) { /* fall through to waiting state */ }
 
+  // Intake method 2: order delivered by postMessage from a studio popup.
   window.addEventListener("message", function (ev) {
     if (ev.origin !== STUDIO_ORIGIN) return;
     var d = ev.data || {};
@@ -248,12 +260,14 @@
     if (d && d.type === "ai-video-signup" && d.request) submitSignup(d.request);
   });
 
+  // Let a popup opener know we're ready to receive the order.
   try {
     if (window.opener && !window.opener.closed) {
       window.opener.postMessage({ type: "ai-video-relay-ready" }, STUDIO_ORIGIN);
     }
   } catch (e) {}
 
+  // If nothing arrived after a while, say so plainly.
   setTimeout(function () {
     if (!submitted) {
       iconEl.className = "ok";
